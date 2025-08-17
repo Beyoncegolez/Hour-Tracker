@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Hour Tracker - Firebase</title>
+  <!-- Firebase scripts -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+  <style>
+    body { font-family: Arial; background:#f5f5f5; padding:0 15px; }
+    h1,h2,h3{text-align:center;color:#333;}
+    input, button{padding:10px;margin:5px; border-radius:4px; border:1px solid #ccc;}
+    button{background:#007BFF;color:white; border:none; cursor:pointer;}
+    button:hover{background:#0056b3;}
+    .student-row{background:white;padding:10px;margin:5px 0;border-radius:6px;display:flex;justify-content:space-between;flex-wrap:wrap;align-items:center;}
+    .student-info{flex:1 1 150px;margin-bottom:5px;}
+    .button-group{display:flex;flex-wrap:wrap;gap:5px;}
+    @media(max-width:500px){.student-row{flex-direction:column;align-items:flex-start;}.button-group button{flex:1 1 100%;}}
+  </style>
+</head>
+<body>
+<h1>Hour Tracker - Firebase</h1>
+
+<div id="loginSection">
+  <h3>Login</h3>
+  <input type="password" id="adminPassword" placeholder="Enter admin password">
+  <button onclick="loginAsAdmin()">Login as Admin</button>
+</div>
+
+<h3>Add Yourself</h3>
+<input type="text" id="nameInput" placeholder="Enter full name">
+<input type="text" id="studentInput" placeholder="Enter student number">
+<button onclick="addPerson()">Add Person</button>
+
+<div id="adminControls" style="display:none;">
+  <h2>Admin Controls</h2>
+  <button onclick="exportCSV()">Export to CSV</button>
+  <button onclick="resetAll()">Reset All Data</button>
+  <h3>All People</h3>
+  <div id="peopleList"></div>
+</div>
+
+<div id="userView" style="display:none;">
+  <h2>Your Hours</h2>
+  <div id="userInfo"></div>
+</div>
+
+<script>
+  // Firebase configuration
+  const firebaseConfig = {
+    apiKey: "AIzaSyAElOGW9qWeikaO2A6Yx_J7X8gCS207Ubo",
+    authDomain: "volunteer-hours-tracker-adfbd.firebaseapp.com",
+    databaseURL: "https://volunteer-hours-tracker-adfbd-default-rtdb.firebaseio.com",
+    projectId: "volunteer-hours-tracker-adfbd",
+    storageBucket: "volunteer-hours-tracker-adfbd.firebasestorage.app",
+    messagingSenderId: "559909716418",
+    appId: "1:559909716418:web:0d675156782b45742fd65b",
+    measurementId: "G-8MX2C6J8W2"
+  };
+
+  // Initialize Firebase
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  const ADMIN_PASS = "1234";
+  let isAdmin = false;
+  let currentUser = null;
+  let people = {};
+
+  // Listen to all people in database and update live
+  db.ref("people").on("value", snapshot => {
+    people = snapshot.val() || {};
+    render();
+  });
+
+  function loginAsAdmin() {
+    const entered = document.getElementById("adminPassword").value;
+    if (entered === ADMIN_PASS) {
+      isAdmin = true;
+      document.getElementById("adminControls").style.display = "block";
+      alert("Logged in as admin!");
+    } else {
+      alert("Wrong password!");
+    }
+  }
+
+  function addPerson() {
+    const name = document.getElementById("nameInput").value.trim();
+    const student = document.getElementById("studentInput").value.trim();
+    if(!name || !student) return;
+
+    currentUser = student; // Set current user immediately
+
+    // Add or keep existing user
+    db.ref("people/"+student).set({ name, student, minutes: people[student]?.minutes || 0 }, () => {
+      document.getElementById("userView").style.display = "block";
+      render();
+    });
+
+    // Clear input
+    document.getElementById("nameInput").value = "";
+    document.getElementById("studentInput").value = "";
+  }
+
+  function addThirty(student) {
+    if(isAdmin || student === currentUser) {
+      const currentMinutes = people[student]?.minutes || 0;
+      db.ref("people/"+student+"/minutes").set(currentMinutes + 30);
+    } else alert("You can only update your own hours.");
+  }
+
+  function resetAll() {
+    if(!isAdmin) return;
+    if(confirm("⚠️ Delete all students?")) {
+      db.ref("people").remove();
+      currentUser = null;
+      document.getElementById("userView").style.display = "none";
+    }
+  }
+
+  function resetStudent(student) {
+    if(!isAdmin) return;
+    if(confirm(`Delete ${people[student].name}?`)) {
+      db.ref("people/"+student).remove();
+      if(student === currentUser) { currentUser=null; document.getElementById("userView").style.display="none"; }
+    }
+  }
+
+  function resetStudentHours(student) {
+    if(!isAdmin) return;
+    if(confirm(`Reset hours for ${people[student].name}?`)) {
+      db.ref("people/"+student+"/minutes").set(0);
+    }
+  }
+
+  function exportCSV() {
+    if(!isAdmin) { alert("Only admin can export"); return; }
+    let csv = "data:text/csv;charset=utf-8,Name,Student Number,Minutes\n";
+    for(const student in people) {
+      const p = people[student];
+      csv += `${p.name},${p.student},${p.minutes}\n`;
+    }
+    const link = document.createElement("a");
+    link.setAttribute("href", encodeURI(csv));
+    link.setAttribute("download", "hours.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  function render() {
+    // Admin sees all users
+    if(isAdmin){
+      const container = document.getElementById("peopleList");
+      container.innerHTML="";
+      for(const student in people){
+        const p=people[student];
+        const div=document.createElement("div");
+        div.className="student-row";
+        div.innerHTML = `
+          <div class="student-info"><b>${p.name}</b> (ID: ${p.student}) — ${p.minutes} minutes</div>
+          <div class="button-group">
+            <button onclick="addThirty('${student}')">+30</button>
+            <button onclick="resetStudentHours('${student}')">Reset Hours</button>
+            <button onclick="resetStudent('${student}')">Delete Student</button>
+          </div>
+        `;
+        container.appendChild(div);
+      }
+    }
+
+    // Regular user sees only themselves, auto-updates live
+    if(currentUser && people[currentUser]){
+      const p = people[currentUser];
+      document.getElementById("userInfo").innerHTML = `
+        <b>${p.name}</b> (ID: ${p.student}) — ${p.minutes} minutes
+        <button onclick="addThirty('${currentUser}')">+30</button>
+      `;
+      document.getElementById("userView").style.display = "block";
+    } else if(currentUser && !people[currentUser]){
+      document.getElementById("userView").style.display="none"; currentUser=null;
+    }
+  }
+</script>
+</body>
+</html>
